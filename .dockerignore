@@ -1,0 +1,29 @@
+# VCS
+.git
+.gitignore
+.github
+
+# Editors/OS
+.DS_Store
+.idea
+.vscode
+
+# Build artifacts
+bin/
+build/
+dist/
+out/
+tmp/
+coverage/
+.cache/
+
+# Logs and env
+*.log
+.env
+.env.*
+
+# Node/others
+node_modules/
+
+# Containers
+docker-compose.*
