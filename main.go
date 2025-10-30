@@ -87,6 +87,8 @@ func getEnvVariables() {
         }
     }
 
+    // No need to read ROOMS_PER_REPLICA; we derive from room.Capacity
+
 	// Extra check: In order not to fall into infinite loop
 	// we change down scale trigger, so that after we scale up
 	// fleet does not immediately scales down and vice versa
@@ -183,8 +185,73 @@ func handleAutoscale(w http.ResponseWriter, r *http.Request) {
 				faResp.Replicas = int32(replicas)
 			}
 		}
-	} else if faReq.Request.Status.Replicas != 0 {
-		allocatedPercent := float64(faReq.Request.Status.AllocatedReplicas) / float64(faReq.Request.Status.Replicas)
+    } else if faReq.Request.Status.Replicas != 0 {
+        // If FleetStatus exposes a "room" counter, derive replicas from it.
+        // FleetStatus.Counters["room"].Capacity is aggregated across the fleet.
+        // capacityPerReplica = room.Capacity / currentReplicas
+        // desiredReplicas = ceil(room.Count / capacityPerReplica)
+        if faReq.Request.Status.Counters != nil {
+            if room, ok := faReq.Request.Status.Counters["room"]; ok {
+                // room.Count is expected to be an int64 aggregate across the fleet
+                // room.Capacity is aggregated capacity across the fleet
+                if room.Capacity > 0 && faReq.Request.Status.Replicas > 0 {
+                    current := faReq.Request.Status.Replicas
+                    capPerReplica := float64(room.Capacity) / float64(current)
+                    if capPerReplica > 0 {
+                        // Base target needed to cover rooms with current per-replica capacity
+                        desired := int32(math.Ceil(float64(room.Count) / capPerReplica))
+                        // Clamp base desired to min/max bounds
+                        if desired < minReplicasCount {
+                            desired = minReplicasCount
+                        }
+                        if maxReplicasCount > 0 && desired > maxReplicasCount {
+                            desired = maxReplicasCount
+                        }
+
+                        // Apply scaleFactor step semantics similar to threshold path,
+                        // but never under-provision below desired.
+                        next := current
+                        if desired > current {
+                            stepUp := int32(math.Ceil(float64(current) * scaleFactor))
+                            if stepUp < desired {
+                                next = desired
+                            } else {
+                                next = stepUp
+                            }
+                        } else if desired < current {
+                            stepDown := int32(math.Ceil(float64(current) / scaleFactor))
+                            if stepDown < desired {
+                                next = desired
+                            } else {
+                                next = stepDown
+                            }
+                        }
+
+                        // Final clamp to global bounds
+                        if next < minReplicasCount {
+                            next = minReplicasCount
+                        }
+                        if maxReplicasCount > 0 && next > maxReplicasCount {
+                            next = maxReplicasCount
+                        }
+
+                        if next != current {
+                            faResp.Scale = true
+                            faResp.Replicas = next
+                        }
+                        // Proceed to response
+                        w.Header().Set("Content-Type", "application/json")
+                        review := &autoscalingv1.FleetAutoscaleReview{
+                            Request:  faReq.Request,
+                            Response: &faResp,
+                        }
+                        _ = json.NewEncoder(w).Encode(review)
+                        return
+                    }
+                }
+            }
+        }
+        allocatedPercent := float64(faReq.Request.Status.AllocatedReplicas) / float64(faReq.Request.Status.Replicas)
         if allocatedPercent > replicaUpperThreshold {
             // After scaling we would have percentage of 0.7/2 = 0.35 > replicaLowerThreshold
             // So we won't scale down immediately after scale up
