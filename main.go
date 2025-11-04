@@ -209,24 +209,8 @@ func handleAutoscale(w http.ResponseWriter, r *http.Request) {
 						}
 						slog.Info("Calculated capacityPerReplica", "capacityPerReplica", capPerReplica, ", desired", desired, ", current", current, ", min", minReplicasCount, ", max", maxReplicasCount)
 
-						// Apply scaleFactor step semantics similar to threshold path,
-						// but never under-provision below desired.
-						next := current
-						if desired > current {
-							stepUp := int32(math.Ceil(float64(current) * scaleFactor))
-							if stepUp < desired {
-								next = desired
-							} else {
-								next = stepUp
-							}
-						} else if desired < current {
-							stepDown := int32(math.Ceil(float64(current) / scaleFactor))
-							if stepDown < desired {
-								next = desired
-							} else {
-								next = stepDown
-							}
-						}
+						// ignore a threshold
+						next := int32(math.Ceil(float64(desired) * scaleFactor))
 
 						// Final clamp to global bounds
 						if next < minReplicasCount {
