@@ -207,6 +207,7 @@ func handleAutoscale(w http.ResponseWriter, r *http.Request) {
 						if maxReplicasCount > 0 && desired > maxReplicasCount {
 							desired = maxReplicasCount
 						}
+						slog.Info("Calculated capacityPerReplica", "capacityPerReplica", capPerReplica, ", desired", desired, ", current", current, ", min", minReplicasCount, ", max", maxReplicasCount)
 
 						// Apply scaleFactor step semantics similar to threshold path,
 						// but never under-provision below desired.

@@ -1,82 +1,68 @@
-name: Build and Push Docker image
+name: Build and Push Images
 
 on:
   push:
-    branches: [ "main", "master" ]
-  workflow_dispatch:
-    inputs:
-      image_tag:
-        description: "Optional override image tag"
-        required: false
-        type: string
+    branches: [ main, master ]
+    tags: [ 'v*', 'release-*' ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
 
 jobs:
   build:
-    runs-on: ubuntu-latest
     name: Build
-    permissions:
-      contents: read
-      id-token: write
+    runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
-          token_format: access_token
-
-      - name: Login to Artifact Registry (Docker)
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.REGISTRY_HOST }}
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Compute image tags
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
         id: meta
-        shell: bash
         run: |
-          set -euo pipefail
-          # GAR_IMAGE_PATH must be a repo secret like:
-          #   asia-southeast1-docker.pkg.dev/<PROJECT>/<REPOSITORY>/<IMAGE_NAME>
-          IMAGE_PATH="${{ secrets.GAR_IMAGE_PATH }}"
-          if [ -z "$IMAGE_PATH" ]; then
-            echo "GAR_IMAGE_PATH secret is required (e.g., asia-southeast1-docker.pkg.dev/<PROJECT>/<REPOSITORY>/<IMAGE_NAME>)" >&2
-            exit 1
-          fi
-          REGISTRY_HOST="$(echo "$IMAGE_PATH" | awk -F/ '{print $1}')"
-          SHA_TAG="${IMAGE_PATH}:${GITHUB_SHA}"
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO_NAME=${{ github.event.repository.name }}
+          IMAGE_BASE="$OWNER_LC/$REPO_NAME-${{ matrix.service }}"
 
-          EXTRA_TAG=""
-          if [ -n "${{ github.event.inputs.image_tag || '' }}" ]; then
-            EXTRA_TAG="${IMAGE_PATH}:${{ github.event.inputs.image_tag }}"
-          else
-            if [ "${{ github.ref }}" = "refs/heads/${{ github.event.repository.default_branch }}" ]; then
-              EXTRA_TAG="${IMAGE_PATH}:latest"
-            fi
+          TAGS=(
+            "${{ env.REGISTRY }}/$IMAGE_BASE:sha-${{ github.sha }}"
+          )
+
+          # Add `latest` for default branch
+          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master" ]]; then
+            TAGS+=("${{ env.REGISTRY }}/$IMAGE_BASE:latest")
           fi
 
-          echo "image_path=${IMAGE_PATH}" >> "$GITHUB_OUTPUT"
-          echo "registry_host=${REGISTRY_HOST}" >> "$GITHUB_OUTPUT"
-          if [ -n "$EXTRA_TAG" ]; then
-            echo "tags=${SHA_TAG},${EXTRA_TAG}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tags=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          # If building a tag, also tag with the ref name
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            REF_NAME=${{ github.ref_name }}
+            TAGS+=("${{ env.REGISTRY }}/$IMAGE_BASE:${REF_NAME}")
           fi
 
-      - name: Build and push image
-        uses: docker/build-push-action@v5
+          printf 'tags=%s' "$(IFS=","; echo "${TAGS[*]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
-          provenance: false
+          file: Dockerfile
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64
