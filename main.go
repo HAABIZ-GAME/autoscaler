@@ -220,7 +220,8 @@ func handleAutoscale(w http.ResponseWriter, r *http.Request) {
 							next = maxReplicasCount
 						}
 
-						if next != current {
+						// scale up only if needed
+						if next != current && next > current {
 							faResp.Scale = true
 							faResp.Replicas = next
 						}
