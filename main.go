@@ -196,44 +196,39 @@ func handleAutoscale(w http.ResponseWriter, r *http.Request) {
 				// room.Capacity is aggregated capacity across the fleet
 				if room.Capacity > 0 && faReq.Request.Status.Replicas > 0 {
 					current := faReq.Request.Status.Replicas
-					capPerReplica := float64(room.Capacity) / float64(current)
-					if capPerReplica > 0 {
-						// Base target needed to cover rooms with current per-replica capacity
-						desired := int32(math.Ceil(float64(room.Count) / capPerReplica))
-						// Clamp base desired to min/max bounds
-						if desired < minReplicasCount {
-							desired = minReplicasCount
-						}
-						if maxReplicasCount > 0 && desired > maxReplicasCount {
-							desired = maxReplicasCount
-						}
-						slog.Info("Calculated capacityPerReplica", "capacityPerReplica", capPerReplica, ", desired", desired, ", current", current, ", min", minReplicasCount, ", max", maxReplicasCount)
-
-						// ignore a threshold
-						next := int32(math.Ceil(float64(desired) * scaleFactor))
-
-						// Final clamp to global bounds
-						if next < minReplicasCount {
-							next = minReplicasCount
-						}
-						if maxReplicasCount > 0 && next > maxReplicasCount {
-							next = maxReplicasCount
-						}
-
-						// scale up only if needed
-						if next != current && next > current {
-							faResp.Scale = true
-							faResp.Replicas = next
-						}
-						// Proceed to response
-						w.Header().Set("Content-Type", "application/json")
-						review := &autoscalingv1.FleetAutoscaleReview{
-							Request:  faReq.Request,
-							Response: &faResp,
-						}
-						_ = json.NewEncoder(w).Encode(review)
-						return
+					capPerReplica := 5.0 // fixed value for now
+					// Base target needed to cover rooms with current per-replica capacity
+					desired := int32(math.Ceil(float64(room.Count) / capPerReplica))
+					// Clamp base desired to min/max bounds
+					if desired < minReplicasCount {
+						desired = minReplicasCount
 					}
+					if maxReplicasCount > 0 && desired > maxReplicasCount {
+						desired = maxReplicasCount
+					}
+					slog.Info("Calculated capacityPerReplica", "capacityPerReplica", capPerReplica, ", desired", desired, ", current", current, ", min", minReplicasCount, ", max", maxReplicasCount)
+					// ignore a threshold
+					next := int32(math.Ceil(float64(desired) * scaleFactor))
+					// Final clamp to global bounds
+					if next < minReplicasCount {
+						next = minReplicasCount
+					}
+					if maxReplicasCount > 0 && next > maxReplicasCount {
+						next = maxReplicasCount
+					}
+					// scale up only if needed
+					if next != current && next > current {
+						faResp.Scale = true
+						faResp.Replicas = next
+					}
+					// Proceed to response
+					w.Header().Set("Content-Type", "application/json")
+					review := &autoscalingv1.FleetAutoscaleReview{
+						Request:  faReq.Request,
+						Response: &faResp,
+					}
+					_ = json.NewEncoder(w).Encode(review)
+					return
 				}
 			}
 		}
